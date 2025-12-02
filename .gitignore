@@ -1,0 +1,14 @@
+# Arquivos de cache e dependências do Dart e Flutter
+.dart_tool/
+.packages
+.pub-cache/
+
+# Pasta de build (arquivos gerados)
+build/
+
+# Arquivos de configuração do editor
+.idea/
+*.iml
+
+# Outros arquivos gerados
+pubspec.lock
