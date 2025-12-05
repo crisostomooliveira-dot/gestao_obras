@@ -1,9 +1,10 @@
-import 'package:controle_compras/features/dashboard/dashboard_page.dart';
-import 'package:controle_compras/features/history/price_history_page.dart';
-import 'package:controle_compras/features/home/tabs/purchases_tab.dart';
-import 'package:controle_compras/features/home/tabs/registrations_tab.dart';
-import 'package:controle_compras/features/home/tabs/tracking_tab.dart';
+import 'package:gestao_obras/features/dashboard/dashboard_page.dart';
+import 'package:gestao_obras/features/history/price_history_page.dart';
+import 'package:gestao_obras/features/home/tabs/purchases_tab.dart';
+import 'package:gestao_obras/features/home/tabs/registrations_tab.dart';
+import 'package:gestao_obras/features/home/tabs/tracking_tab.dart';
 import 'package:flutter/material.dart';
+import 'package:gestao_obras/features/rental/rental_page.dart';
 
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});
@@ -19,11 +20,12 @@ class _MainLayoutState extends State<MainLayout> {
     const DashboardPage(),
     const PurchasesTab(),
     const TrackingTab(),
+    const RentalPage(),
     const PriceHistoryPage(),
     const RegistrationsTab(),
   ];
 
-  final List<String> _pageTitles = ['Dashboard', 'Compras', 'Acompanhamento', 'Histórico de Preços', 'Cadastros'];
+  final List<String> _pageTitles = ['Dashboard', 'Compras', 'Acompanhamento', 'Aluguel de Equipamentos', 'Histórico de Preços', 'Cadastros'];
 
   @override
   Widget build(BuildContext context) {
@@ -45,9 +47,10 @@ class _MainLayoutState extends State<MainLayout> {
                   _buildNavItem(Icons.dashboard, 'Dashboard', 0),
                   _buildNavItem(Icons.shopping_cart, 'Compras', 1),
                   _buildNavItem(Icons.track_changes, 'Acompanhamento', 2),
-                  _buildNavItem(Icons.history, 'Histórico de Preços', 3),
+                  _buildNavItem(Icons.build_circle, 'Aluguel', 3),
+                  _buildNavItem(Icons.history, 'Histórico de Preços', 4),
                   const Spacer(),
-                  _buildNavItem(Icons.app_registration, 'Cadastros', 4),
+                  _buildNavItem(Icons.app_registration, 'Cadastros', 5),
                   const SizedBox(height: 20),
                 ],
               ),

@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:controle_compras/features/purchase/purchase_detail_page.dart';
+import 'package:gestao_obras/features/purchase/purchase_detail_page.dart';
 import 'package:flutter/material.dart';
+import 'package:gestao_obras/features/rental/rental_page.dart';
 import 'package:intl/intl.dart';
 
 class TrackingTab extends StatefulWidget {
@@ -17,40 +19,77 @@ class _TrackingTabState extends State<TrackingTab> {
   String? _generalStatusFilter;
   String? _paymentStatusFilter;
   String? _deliveryStatusFilter;
-  late Stream<QuerySnapshot> _purchasesStream;
+  late Stream<List<DocumentSnapshot>> _combinedStream;
 
   @override
   void initState() {
     super.initState();
-    _purchasesStream = const Stream.empty();
+    _combinedStream = const Stream.empty();
     _nfController.addListener(() => _updateStream());
     _updateStream();
   }
 
   void _updateStream() {
-    Query query = FirebaseFirestore.instance.collection('purchase_requests');
+    // Base queries
+    Query purchasesQuery = FirebaseFirestore.instance.collection('purchase_requests');
+    Query rentalsQuery = FirebaseFirestore.instance.collection('rental_invoices');
 
     if (widget.constructionIdFilter != null) {
-      query = query.where('constructionId', isEqualTo: widget.constructionIdFilter);
+      purchasesQuery = purchasesQuery.where('constructionId', isEqualTo: widget.constructionIdFilter);
+      rentalsQuery = rentalsQuery.where('constructionId', isEqualTo: widget.constructionIdFilter);
     }
 
-    if (_generalStatusFilter != null) {
-      query = query.where('status', isEqualTo: _generalStatusFilter);
-    }
-    if (_nfController.text.isNotEmpty) {
-      query = query.where('invoiceNumber', isEqualTo: _nfController.text.trim());
-    }
+    // Filtro unificado para status de pagamento
     if (_paymentStatusFilter != null) {
-      query = query.where('paymentStatus', isEqualTo: _paymentStatusFilter);
+        purchasesQuery = purchasesQuery.where('paymentStatus', isEqualTo: _paymentStatusFilter);
+        rentalsQuery = rentalsQuery.where('paymentStatus', isEqualTo: _paymentStatusFilter);
     }
+    
+    // Filtro para status de material (apenas aluguéis)
     if (_deliveryStatusFilter != null) {
-      query = query.where('deliveryStatus', isEqualTo: _deliveryStatusFilter);
+        rentalsQuery = rentalsQuery.where('materialStatus', isEqualTo: _deliveryStatusFilter);
+        // Como compras não têm `materialStatus`, a query de compras não é filtrada aqui.
     }
 
-    query = query.orderBy('requestDate', descending: true);
+    // Filtro geral (se aplicável a ambos)
+    if (_generalStatusFilter != null) {
+        purchasesQuery = purchasesQuery.where('status', isEqualTo: _generalStatusFilter);
+        // Se o status geral também se aplica a aluguéis, adicione a linha abaixo
+        // rentalsQuery = rentalsQuery.where('status', isEqualTo: _generalStatusFilter);
+    }
+
+    // Nota: A combinação de filtros pode exigir índices compostos no Firestore.
+
+    final Stream<List<DocumentSnapshot>> combined = ZippedStream(
+      [purchasesQuery.snapshots(), rentalsQuery.snapshots()],
+      (snapshots) {
+        final allDocs = [...(snapshots[0] as QuerySnapshot).docs, ...(snapshots[1] as QuerySnapshot).docs];
+        
+        // Aplicar filtros que não podem ser feitos no servidor (se necessário)
+        final filteredDocs = allDocs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          if (_deliveryStatusFilter != null && doc.reference.path.contains('purchase_requests')) {
+             // Se um filtro de material for aplicado, esconde as compras, pois elas não têm esse status.
+             return false;
+          }
+          return true;
+        }).toList();
+
+        filteredDocs.sort((a, b) {
+          final aDate = (a.data() as Map<String, dynamic>).containsKey('requestDate') 
+              ? (a['requestDate'] as Timestamp?)?.toDate() 
+              : (a['createdAt'] as Timestamp?)?.toDate();
+          final bDate = (b.data() as Map<String, dynamic>).containsKey('requestDate') 
+              ? (b['requestDate'] as Timestamp?)?.toDate() 
+              : (b['createdAt'] as Timestamp?)?.toDate();
+          return (bDate ?? DateTime(0)).compareTo(aDate ?? DateTime(0));
+        });
+        return filteredDocs;
+      }
+    ).asBroadcastStream();
 
     setState(() {
-      _purchasesStream = query.snapshots();
+      _combinedStream = combined;
     });
   }
 
@@ -61,14 +100,14 @@ class _TrackingTabState extends State<TrackingTab> {
         children: [
           if (widget.constructionIdFilter == null) _buildFilters(),
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _purchasesStream,
+            child: StreamBuilder<List<DocumentSnapshot>>(
+              stream: _combinedStream,
               builder: (context, snapshot) {
-                if (snapshot.hasError) return const Center(child: Text('Ocorreu um erro.'));
+                if (snapshot.hasError) return Center(child: Text('Ocorreu um erro: ${snapshot.error}'));
                 if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-                if (snapshot.data!.docs.isEmpty) return const Center(child: Text('Nenhuma compra encontrada.'));
+                if (!snapshot.hasData || snapshot.data!.isEmpty) return const Center(child: Text('Nenhuma despesa encontrada.'));
 
-                return ListView(children: snapshot.data!.docs.map((doc) => _buildTrackingCard(context, doc)).toList());
+                return ListView(children: snapshot.data!.map((doc) => _buildTrackingCard(context, doc)).toList());
               },
             ),
           ),
@@ -78,6 +117,15 @@ class _TrackingTabState extends State<TrackingTab> {
   }
 
   Widget _buildTrackingCard(BuildContext context, DocumentSnapshot doc) {
+    final isPurchase = doc.reference.path.contains('purchase_requests');
+    if (isPurchase) {
+      return _buildPurchaseCard(context, doc);
+    } else {
+      return _buildRentalCard(context, doc);
+    }
+  }
+  
+  Widget _buildPurchaseCard(BuildContext context, DocumentSnapshot doc) {
     final data = doc.data()! as Map<String, dynamic>;
     final status = data['status'] ?? 'N/A';
     
@@ -143,9 +191,43 @@ class _TrackingTabState extends State<TrackingTab> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Status: $status', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Text('COMPRA - Status: $status', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 8),
               content,
+            ],
+          ),
+        ),
+      ),
+    );
+
+  }
+  
+  Widget _buildRentalCard(BuildContext context, DocumentSnapshot doc) {
+    final data = doc.data()! as Map<String, dynamic>;
+    final paymentDueDate = (data['paymentDueDate'] as Timestamp?)?.toDate();
+    final isOverdue = paymentDueDate != null && paymentDueDate.isBefore(DateTime.now());
+
+    return Card(
+      color: isOverdue ? Colors.red[100] : null,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: InkWell(
+        onTap: () => showDialog(context: context, barrierDismissible: false, builder: (context) => Dialog.fullscreen(child: RentalInvoiceDialog(doc: doc))),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+               Text('ALUGUEL - Status: ${data['materialStatus'] ?? '-'}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+               const SizedBox(height: 8),
+               Text('Fornecedor: ${data['supplierName'] ?? 'N/A'}'),
+               Text('Fatura: ${data['invoiceNumber'] ?? '-'} | Contrato: ${data['contractNumber'] ?? '-'}'),
+               Text('Vencimento: ${paymentDueDate != null ? DateFormat('dd/MM/yyyy').format(paymentDueDate) : '-'}'),
+               Text('Pagamento: ${data['paymentStatus'] ?? 'Pendente'}'),
+               const SizedBox(height: 8),
+               Align(
+                 alignment: Alignment.centerRight,
+                 child: Text(NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(data['totalValue'] ?? 0.0), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+               )
             ],
           ),
         ),
@@ -154,32 +236,18 @@ class _TrackingTabState extends State<TrackingTab> {
   }
 
   Widget _buildFilters() {
-    return Padding(
+     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: Column(
         children: [
-          DropdownButtonFormField<String>(
-            decoration: const InputDecoration(labelText: 'Filtrar por Status Geral'),
-            value: _generalStatusFilter,
-            onChanged: (value) {
-              setState(() {
-                _generalStatusFilter = value;
-                _paymentStatusFilter = null;
-                _deliveryStatusFilter = null;
-                _nfController.clear();
-                _updateStream();
-              });
-            },
-            items: ['Solicitado', 'Pedido Criado', 'Finalizado'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-          ),
-          const SizedBox(height: 12),
+          // Removido filtro de status geral para simplificar
           TextField(controller: _nfController, decoration: const InputDecoration(labelText: 'Buscar por Nº da Nota Fiscal')),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: DropdownButtonFormField<String>(decoration: const InputDecoration(labelText: 'Pagamento'), value: _paymentStatusFilter, items: ['Aguardando Aprovação', 'Pendente', 'Pago', 'Atrasado'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) => setState(() { _paymentStatusFilter = v; _updateStream(); }))),
+              Expanded(child: DropdownButtonFormField<String>(decoration: const InputDecoration(labelText: 'Status do Pagamento'), value: _paymentStatusFilter, items: ['Pendente', 'Aguardando Pagamento', 'Pago', 'Atrasado'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) => setState(() { _paymentStatusFilter = v; _deliveryStatusFilter = null; _updateStream(); }))),
               const SizedBox(width: 12),
-              Expanded(child: DropdownButtonFormField<String>(decoration: const InputDecoration(labelText: 'Entrega'), value: _deliveryStatusFilter, items: ['Aguardando Entrega', 'Entregue', 'Em Trânsito', 'Retirar Material'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) => setState(() { _deliveryStatusFilter = v; _updateStream(); }))),
+              Expanded(child: DropdownButtonFormField<String>(decoration: const InputDecoration(labelText: 'Status do Material'), value: _deliveryStatusFilter, items: ['Mat. em Obra', 'Mat. Devolvido'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) => setState(() { _deliveryStatusFilter = v; _paymentStatusFilter = null; _updateStream(); }))),
             ],
           ),
         ],
@@ -191,5 +259,55 @@ class _TrackingTabState extends State<TrackingTab> {
   void dispose() {
     _nfController.dispose();
     super.dispose();
+  }
+}
+
+
+// Helper class to combine and zip streams
+class ZippedStream<T> extends Stream<T> {
+  final List<Stream<dynamic>> _streams;
+  final T Function(List<dynamic>) _zipper;
+
+  ZippedStream(this._streams, this._zipper);
+
+  @override
+  StreamSubscription<T> listen(void Function(T)? onData, {Function? onError, void Function()? onDone, bool? cancelOnError}) {
+    final subscriptions = <StreamSubscription>[];
+    final values = List<dynamic>.filled(_streams.length, null);
+    final active = List<bool>.filled(_streams.length, false);
+    int completed = 0;
+
+    final controller = StreamController<T>(onCancel: () {
+      for (var sub in subscriptions) {
+        sub.cancel();
+      }
+    });
+
+    void onDataEvent(int index, dynamic data) {
+      values[index] = data;
+      if (!active[index]) {
+          active[index] = true;
+      }
+      if (active.every((a) => a)) { // Check if all streams have emitted at least once
+          controller.add(_zipper(List.from(values)));
+      }
+    }
+
+    void onDoneEvent() {
+      completed++;
+      if (completed >= _streams.length && !controller.isClosed) {
+        controller.close();
+      }
+    }
+
+    for (int i = 0; i < _streams.length; i++) {
+      subscriptions.add(_streams[i].listen(
+        (data) => onDataEvent(i, data),
+        onError: controller.addError,
+        onDone: onDoneEvent,
+      ));
+    }
+
+    return controller.stream.listen(onData, onError: onError, onDone: onDone, cancelOnError: cancelOnError);
   }
 }

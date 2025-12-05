@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:controle_compras/features/home/tabs/tracking_tab.dart';
+import 'package:gestao_obras/features/home/tabs/tracking_tab.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -12,7 +12,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  StreamSubscription? _requestsSubscription;
+  StreamSubscription? _dataSubscription;
   Map<String, dynamic>? _dashboardData;
   final StreamController<Map<String, dynamic>> _dashboardStreamController = StreamController.broadcast();
 
@@ -32,28 +32,46 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   void _listenToDataChanges() {
-    _requestsSubscription?.cancel();
-    _requestsSubscription = FirebaseFirestore.instance.collection('purchase_requests').snapshots().listen((requestsSnapshot) async {
+    _dataSubscription?.cancel();
+    
+    final purchaseRequestsStream = FirebaseFirestore.instance.collection('purchase_requests').snapshots();
+    final rentalInvoicesStream = FirebaseFirestore.instance.collection('rental_invoices').snapshots(); // CORRIGIDO
+
+    // Combine streams to listen to both collections
+    _dataSubscription = purchaseRequestsStream.asyncMap((requestsSnapshot) async {
+      final rentalsSnapshot = await rentalInvoicesStream.first; // Get latest rentals snapshot
       final constructionsSnapshot = await FirebaseFirestore.instance.collection('constructions').get();
-      _processData(constructionsSnapshot, requestsSnapshot);
+      return {'requests': requestsSnapshot, 'rentals': rentalsSnapshot, 'constructions': constructionsSnapshot};
+    }).listen((snapshots) {
+      _processData(snapshots['constructions']!, snapshots['requests']!, snapshots['rentals']!);
     });
   }
 
-  void _processData(QuerySnapshot constructionsSnapshot, QuerySnapshot requestsSnapshot) {
+  void _processData(QuerySnapshot constructionsSnapshot, QuerySnapshot requestsSnapshot, QuerySnapshot rentalsSnapshot) {
     final constructions = constructionsSnapshot.docs;
-    final requests = requestsSnapshot.docs;
-
+    
     double totalPurchasedValue = 0;
-    final Map<String, List<DocumentSnapshot>> requestsByConstruction = {};
     final Map<String, double> valueByConstruction = {};
 
-    for (var req in requests) {
+    // Process Purchase Requests
+    for (var req in requestsSnapshot.docs) {
       final data = req.data() as Map<String, dynamic>;
       final constructionId = data['constructionId'];
       final value = (data['totalPrice'] as num?)?.toDouble() ?? 0.0;
 
       if (constructionId != null) {
-        (requestsByConstruction[constructionId] ??= []).add(req);
+        valueByConstruction[constructionId] = (valueByConstruction[constructionId] ?? 0) + value;
+      }
+      totalPurchasedValue += value;
+    }
+
+    // Process Rentals
+    for (var rental in rentalsSnapshot.docs) {
+      final data = rental.data() as Map<String, dynamic>;
+      final constructionId = data['constructionId'];
+      final value = (data['totalValue'] as num?)?.toDouble() ?? 0.0; // CORRIGIDO
+
+      if (constructionId != null) {
         valueByConstruction[constructionId] = (valueByConstruction[constructionId] ?? 0) + value;
       }
       totalPurchasedValue += value;
@@ -61,9 +79,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
     _dashboardData = {
       'constructions': constructions,
-      'requestsByConstructionId': requestsByConstruction,
       'valueByConstruction': valueByConstruction,
-      'totalPurchasedValue': totalPurchasedValue,
+      'totalOverallValue': totalPurchasedValue,
     };
     _dashboardStreamController.add(_dashboardData!);
   }
@@ -71,7 +88,8 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<void> _refreshData() async {
     final constructionsSnapshot = await FirebaseFirestore.instance.collection('constructions').get();
     final requestsSnapshot = await FirebaseFirestore.instance.collection('purchase_requests').get();
-    _processData(constructionsSnapshot, requestsSnapshot);
+    final rentalsSnapshot = await FirebaseFirestore.instance.collection('rental_invoices').get(); // CORRIGIDO
+    _processData(constructionsSnapshot, requestsSnapshot, rentalsSnapshot);
   }
   
   @override
@@ -96,7 +114,7 @@ class _DashboardPageState extends State<DashboardPage> {
           final data = snapshot.data!;
           final constructions = data['constructions'] as List<DocumentSnapshot>;
           final valueByConstruction = data['valueByConstruction'] as Map<String, double>;
-          final totalPurchasedValue = data['totalPurchasedValue'] as double;
+          final totalOverallValue = data['totalOverallValue'] as double;
 
           return RefreshIndicator(
             onRefresh: _refreshData,
@@ -107,7 +125,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 itemCount: constructions.length + 1,
                 itemBuilder: (context, index) {
                   if (index == 0) {
-                    return _buildTotalValueCard(totalPurchasedValue);
+                    return _buildTotalValueCard(totalOverallValue);
                   }
                   final constructionDoc = constructions[index - 1];
                   final totalValue = valueByConstruction[constructionDoc.id] ?? 0.0;
@@ -169,7 +187,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   @override
   void dispose() {
-    _requestsSubscription?.cancel();
+    _dataSubscription?.cancel();
     _dashboardStreamController.close();
     super.dispose();
   }

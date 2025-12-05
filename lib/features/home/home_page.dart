@@ -1,7 +1,7 @@
-import 'package:controle_compras/common/widgets/dashboard_card.dart';
-import 'package:controle_compras/features/home/tabs/purchases_tab.dart';
-import 'package:controle_compras/features/home/tabs/registrations_tab.dart';
-import 'package:controle_compras/features/home/tabs/tracking_tab.dart';
+import 'package:gestao_obras/common/widgets/dashboard_card.dart';
+import 'package:gestao_obras/features/home/tabs/purchases_tab.dart';
+import 'package:gestao_obras/features/home/tabs/registrations_tab.dart';
+import 'package:gestao_obras/features/home/tabs/tracking_tab.dart';
 import 'package:flutter/material.dart';
 
 class HomePage extends StatelessWidget {

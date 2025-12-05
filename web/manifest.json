@@ -1,6 +1,6 @@
 {
-    "name": "controle_compras",
-    "short_name": "controle_compras",
+    "name": "gestao_obras",
+    "short_name": "gestao_obras",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

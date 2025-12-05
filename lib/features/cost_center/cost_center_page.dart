@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:controle_compras/features/cost_center/cost_center_model.dart';
+import 'package:gestao_obras/features/cost_center/cost_center_model.dart';
 import 'package:flutter/material.dart';
 
 class CostCenterPage extends StatefulWidget {

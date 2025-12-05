@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:controle_compras/features/purchase/purchase_detail_page.dart';
-import 'package:controle_compras/features/purchase/purchase_request_page.dart';
+import 'package:gestao_obras/features/purchase/purchase_detail_page.dart';
+import 'package:gestao_obras/features/purchase/purchase_request_page.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 

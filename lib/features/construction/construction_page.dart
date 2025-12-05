@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:controle_compras/common/widgets/state_dropdown.dart';
-import 'package:controle_compras/features/construction/construction_model.dart';
+import 'package:gestao_obras/common/widgets/state_dropdown.dart';
+import 'package:gestao_obras/features/construction/construction_model.dart';
 import 'package:flutter/material.dart';
 
 class ConstructionPage extends StatefulWidget {

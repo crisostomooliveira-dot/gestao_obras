@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:controle_compras/features/product/product_model.dart';
+import 'package:gestao_obras/features/product/product_model.dart';
 import 'package:flutter/material.dart';
 
 class ProductPage extends StatefulWidget {

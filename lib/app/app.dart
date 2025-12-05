@@ -1,4 +1,4 @@
-import 'package:controle_compras/app/main_layout.dart';
+import 'package:gestao_obras/app/main_layout.dart';
 import 'package:flutter/material.dart';
 
 class App extends StatelessWidget {
@@ -7,12 +7,12 @@ class App extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Controle de Compras',
+      title: 'Gestão de Obras',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      debugShowCheckedModeBanner: false, // Remove a faixa de debug
+      debugShowCheckedModeBanner: false,
       home: const MainLayout(),
     );
   }

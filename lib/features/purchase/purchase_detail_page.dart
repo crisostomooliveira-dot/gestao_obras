@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:controle_compras/features/purchase/widgets/step_2_pricing_widget.dart';
-import 'package:controle_compras/features/purchase/widgets/step_3_payment_widget.dart';
+import 'package:gestao_obras/features/purchase/widgets/step_2_pricing_widget.dart';
+import 'package:gestao_obras/features/purchase/widgets/step_3_payment_widget.dart';
 import 'package:flutter/material.dart';
 
 class PurchaseDetailPage extends StatelessWidget {
