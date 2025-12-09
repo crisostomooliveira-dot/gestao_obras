@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-// Main page to display rental invoices
 class RentalPage extends StatefulWidget {
   const RentalPage({super.key});
 
@@ -11,6 +10,37 @@ class RentalPage extends StatefulWidget {
 }
 
 class _RentalPageState extends State<RentalPage> {
+
+  void _showDeleteConfirmationDialog(DocumentSnapshot doc) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar Exclusão'),
+        content: const Text('Tem certeza que deseja excluir esta fatura de aluguel?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _deleteInvoice(doc.id);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteInvoice(String docId) async {
+    try {
+      await FirebaseFirestore.instance.collection('rental_invoices').doc(docId).delete();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Fatura de aluguel excluída com sucesso!')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao excluir fatura: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -41,31 +71,53 @@ class _RentalPageState extends State<RentalPage> {
     final isOverdue = paymentDueDate != null && paymentDueDate.isBefore(DateTime.now());
 
     return Card(
-      color: isOverdue ? Colors.red[100] : null,
+      color: isOverdue ? Colors.red[50] : null,
       margin: const EdgeInsets.only(bottom: 16),
-      child: ListTile(
-        isThreeLine: true, // Garante mais espaço vertical
-        title: Text('Fornecedor: ${data['supplierName'] ?? 'N/A'}', style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(
-          'Obra: ${data['constructionName'] ?? '-'}\\n'
-          'Fatura: ${data['invoiceNumber'] ?? '-'} | Contrato: ${data['contractNumber'] ?? '-'}\\n'
-          'Vencimento: ${paymentDueDate != null ? DateFormat('dd/MM/yyyy').format(paymentDueDate) : '-'}',
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _showInvoiceDialog(doc: doc),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Fornecedor: ${data['supplierName'] ?? 'N/A'}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text('Obra: ${data['constructionName'] ?? '-'}', style: const TextStyle(color: Colors.grey)),
+                    Text('Fatura: ${data['invoiceNumber'] ?? '-'} | Contrato: ${data['contractNumber'] ?? '-'}', style: const TextStyle(color: Colors.grey)),
+                    Text('Vencimento: ${paymentDueDate != null ? DateFormat('dd/MM/yyyy').format(paymentDueDate) : '-'}', style: const TextStyle(color: Colors.grey)),
+                  ],
+                ),
+              ),
+              Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(data['totalValue'] ?? 0.0), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 8),
+                  Chip(
+                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                    label: Text(
+                      data['approvalStatus'] ?? 'Pendente',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    backgroundColor: Colors.orange[100],
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                   IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                    onPressed: () => _showDeleteConfirmationDialog(doc),
+                    tooltip: 'Excluir Fatura',
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(data['totalValue'] ?? 0.0), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 4),
-            Chip(
-              label: Text(data['paymentStatus'] ?? data['status'] ?? 'Pendente'), // Compatibilidade com status antigo
-              backgroundColor: Colors.orange[100],
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap, 
-              visualDensity: VisualDensity.compact,
-            ),
-          ],
-        ),
-        onTap: () => _showInvoiceDialog(doc: doc), // Open details/edit view
       ),
     );
   }
@@ -75,11 +127,10 @@ class _RentalPageState extends State<RentalPage> {
       context: context,
       barrierDismissible: false,
       builder: (context) => Dialog.fullscreen(child: RentalInvoiceDialog(doc: doc)),
-    );
+    ).then((_) => setState(() {}));
   }
 }
 
-// Dialog to add/edit an invoice with multiple items
 class RentalInvoiceDialog extends StatefulWidget {
   final DocumentSnapshot? doc;
   const RentalInvoiceDialog({super.key, this.doc});
@@ -98,6 +149,7 @@ class _RentalInvoiceDialogState extends State<RentalInvoiceDialog> {
   DateTime? _periodStartDate, _periodEndDate, _paymentDueDate;
   String? _paymentStatus;
   String? _materialStatus;
+  String _processStatus = 'Aberto';
 
   List<Map<String, dynamic>> _items = [];
   double _totalValue = 0.0;
@@ -116,14 +168,15 @@ class _RentalInvoiceDialogState extends State<RentalInvoiceDialog> {
       _periodStartDate = (data['periodStartDate'] as Timestamp?)?.toDate();
       _periodEndDate = (data['periodEndDate'] as Timestamp?)?.toDate();
       _paymentDueDate = (data['paymentDueDate'] as Timestamp?)?.toDate();
-      _paymentStatus = data['paymentStatus'] ?? data['status'] ?? 'Pendente'; // Compatibilidade
+      _paymentStatus = data['paymentStatus'] ?? data['status'] ?? 'Pendente';
       _materialStatus = data['materialStatus'] ?? 'Mat. em Obra';
+      _processStatus = data['processStatus'] ?? 'Aberto';
       _items = List<Map<String, dynamic>>.from(data['items'] ?? []);
       _calculateTotal();
     } else {
-      // Valores padrão para novas faturas
       _paymentStatus = 'Pendente';
       _materialStatus = 'Mat. em Obra';
+      _processStatus = 'Aberto';
     }
   }
 
@@ -237,7 +290,7 @@ class _RentalInvoiceDialogState extends State<RentalInvoiceDialog> {
       },
     );
   }
-
+  
   Future<void> _saveInvoice() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -255,6 +308,8 @@ class _RentalInvoiceDialogState extends State<RentalInvoiceDialog> {
       'items': _items,
       'paymentStatus': _paymentStatus,
       'materialStatus': _materialStatus,
+      'processStatus': _processStatus,
+      'approvalStatus': widget.doc?.data() != null ? (widget.doc!.data() as Map<String, dynamic>)['approvalStatus'] ?? 'Aguardando Aprovação' : 'Aguardando Aprovação', 
       'createdAt': widget.doc == null ? FieldValue.serverTimestamp() : (widget.doc!.data() as Map<String, dynamic>)['createdAt'],
     };
 
@@ -273,7 +328,9 @@ class _RentalInvoiceDialogState extends State<RentalInvoiceDialog> {
       appBar: AppBar(
         title: Text(widget.doc == null ? 'Lançar Fatura de Aluguel' : 'Editar Fatura'),
         leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.of(context).pop()),
-        actions: [ElevatedButton(onPressed: _saveInvoice, child: const Text('SALVAR'))],
+        actions: [
+          ElevatedButton(onPressed: _saveInvoice, child: const Text('SALVAR'))
+        ],
       ),
       body: Form(
         key: _formKey,
@@ -301,7 +358,7 @@ class _RentalInvoiceDialogState extends State<RentalInvoiceDialog> {
                 Expanded(child: _buildDateField(context, 'Vencimento Pagamento', _paymentDueDate, (date) => setState(() => _paymentDueDate = date))),
               ]),
               const SizedBox(height: 16),
-              Row( // Novos campos de status
+              Row( 
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
@@ -326,6 +383,15 @@ class _RentalInvoiceDialogState extends State<RentalInvoiceDialog> {
                   ),
                 ],
               ),
+              const SizedBox(height: 16),
+               DropdownButtonFormField<String>(
+                  value: _processStatus,
+                  decoration: const InputDecoration(labelText: 'Status do Processo'),
+                  items: ['Aberto', 'Em processo', 'Finalizada']
+                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                      .toList(),
+                  onChanged: (val) => setState(() => _processStatus = val!),
+                ),
               const Divider(height: 32),
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Itens da Fatura', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), IconButton.filled(onPressed: _addItem, icon: const Icon(Icons.add))]),
               const SizedBox(height: 8),
@@ -340,13 +406,12 @@ class _RentalInvoiceDialogState extends State<RentalInvoiceDialog> {
                         DataCell(Text(NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(item['value'] ?? 0.0))),
                         DataCell(IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => setState(() { _items.remove(item); _calculateTotal(); }))),
                       ])),
-                      // Linha do Total
                       DataRow(
                         cells: [
                           const DataCell(Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold))),
-                          const DataCell(SizedBox.shrink()), // Célula vazia para frequência
+                          const DataCell(SizedBox.shrink()), 
                           DataCell(Text(NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(_totalValue), style: const TextStyle(fontWeight: FontWeight.bold))),
-                          const DataCell(SizedBox.shrink()), // Célula vazia para ações
+                          const DataCell(SizedBox.shrink()), 
                         ],
                       ),
                     ],
@@ -390,7 +455,6 @@ class _RentalInvoiceDialogState extends State<RentalInvoiceDialog> {
         final picked = await showDatePicker(context: context, initialDate: date ?? DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2100));
         onDateChanged(picked);
       },
-       validator: (v) => v == null || v.isEmpty ? 'Obrigatório' : null,
     );
   }
 

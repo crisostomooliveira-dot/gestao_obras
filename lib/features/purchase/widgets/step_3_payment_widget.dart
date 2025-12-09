@@ -63,6 +63,7 @@ class _Step3PaymentWidgetState extends State<Step3PaymentWidget> {
   final _formKey = GlobalKey<FormState>();
   final _nfController = TextEditingController();
   final _freightCostController = TextEditingController();
+  final _observationController = TextEditingController();
 
   String? _paymentStatus;
   String? _deliveryStatus;
@@ -80,6 +81,7 @@ class _Step3PaymentWidgetState extends State<Step3PaymentWidget> {
     _deliveryStatus = widget.requestData['deliveryStatus'];
     _expectedDeliveryDate = (widget.requestData['expectedDeliveryDate'] as Timestamp?)?.toDate();
     _freightCostController.text = (widget.requestData['freightCost'] as num?)?.toStringAsFixed(2) ?? '0.00';
+    _observationController.text = widget.requestData['observation'] ?? '';
     
     final itemsData = (widget.requestData['finalItems'] as List<dynamic>?) ?? [];
     _editableItems = itemsData.map((itemData) {
@@ -122,6 +124,7 @@ class _Step3PaymentWidgetState extends State<Step3PaymentWidget> {
     final sequentialId = widget.requestData['sequentialId']?.toString() ?? 'N/A';
     final supplierName = _getSupplierDisplayName();
     final isFinalizado = widget.requestData['status'] == 'Finalizado';
+    final paymentInstallments = (widget.requestData['paymentInstallments'] as List<dynamic>?) ?? [];
 
     return Form(
       key: _formKey,
@@ -134,6 +137,7 @@ class _Step3PaymentWidgetState extends State<Step3PaymentWidget> {
           const SizedBox(height: 24),
           _buildItemsDataTable(isFinalizado),
           const Divider(height: 24),
+          if(paymentInstallments.isNotEmpty) _buildInstallmentsTable(paymentInstallments),
           TextFormField(controller: _nfController, readOnly: isFinalizado, decoration: const InputDecoration(labelText: 'Número da Nota Fiscal (NF)')),
           const SizedBox(height: 16),
           _buildExpectedDeliveryDateField(context, isFinalizado),
@@ -141,6 +145,13 @@ class _Step3PaymentWidgetState extends State<Step3PaymentWidget> {
           DropdownButtonFormField<String>(value: _paymentStatus, decoration: const InputDecoration(labelText: 'Status do Pagamento'), items: ['Aguardando Aprovação', 'Pendente', 'Pago', 'Atrasado'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: isFinalizado ? null : (v) => setState(() => _paymentStatus = v)),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(value: _deliveryStatus, decoration: const InputDecoration(labelText: 'Status da Entrega'), items: ['Aguardando Entrega', 'Entregue', 'Em Trânsito', 'Retirar Material'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: isFinalizado ? null : (v) => setState(() => _deliveryStatus = v)),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: _observationController,
+            readOnly: isFinalizado,
+            decoration: const InputDecoration(labelText: 'Observação'),
+            maxLines: 3,
+          ),
           const SizedBox(height: 32),
           if (!isFinalizado) 
             ElevatedButton(onPressed: _updateStatus, child: const Text('Salvar e Atualizar Status')),
@@ -148,6 +159,34 @@ class _Step3PaymentWidgetState extends State<Step3PaymentWidget> {
             Center(child: Chip(label: const Text('PEDIDO FINALIZADO'), backgroundColor: Colors.green.shade100, labelStyle: TextStyle(color: Colors.green.shade800, fontWeight: FontWeight.bold)))
         ],
       ),
+    );
+  }
+
+  Widget _buildInstallmentsTable(List<dynamic> installments) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Parcelas de Pagamento', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        DataTable(
+          columns: const [
+            DataColumn(label: Text('Parcela')),
+            DataColumn(label: Text('Vencimento')),
+            DataColumn(label: Text('Valor')),
+            DataColumn(label: Text('Status')),
+          ],
+          rows: installments.map((installment) {
+            final dueDate = (installment['dueDate'] as Timestamp).toDate();
+            return DataRow(cells: [
+              DataCell(Text(installment['installmentNumber'].toString())),
+              DataCell(Text(DateFormat('dd/MM/yyyy').format(dueDate))),
+              DataCell(Text(_formatCurrency(installment['value'] as double))),
+              DataCell(Text(installment['status'] as String)),
+            ]);
+          }).toList(),
+        ),
+        const Divider(height: 24),
+      ],
     );
   }
 
@@ -240,9 +279,9 @@ class _Step3PaymentWidgetState extends State<Step3PaymentWidget> {
             productDescription: selectedProduct.description,
             quantity: quantity,
             unit: selectedProduct.unit,
-            initialPrice: 0.0, // Default price, user can edit
+            initialPrice: 0.0,
             initialDiscountValue: 0.0,
-            supplierId: null, // User might need to define this if it's a mixed order
+            supplierId: null,
             supplierName: null,
           );
           newItem.priceController.addListener(_recalculateTotals);
@@ -319,25 +358,22 @@ class _Step3PaymentWidgetState extends State<Step3PaymentWidget> {
     final newRequestId = FirebaseFirestore.instance.collection('purchase_requests').doc().id;
     final batch = FirebaseFirestore.instance.batch();
 
-    // 1. Get the current highest sequential ID
     final counterRef = FirebaseFirestore.instance.collection('counters').doc('purchase_requests');
     final counterSnapshot = await counterRef.get();
     final newSequentialId = (counterSnapshot.data()?['currentId'] ?? 0) + 1;
     batch.update(counterRef, {'currentId': newSequentialId});
 
-    // 2. Create the new purchase request document
     final newRequestData = {
-      ...widget.requestData, // Copy all fields from the original request
+      ...widget.requestData,
       'sequentialId': newSequentialId,
-      'status': 'Solicitado', // Reset status
-      'createdAt': FieldValue.serverTimestamp(), // New creation date
-      // Fields to clear
+      'status': 'Solicitado',
+      'createdAt': FieldValue.serverTimestamp(),
       'invoiceNumber': null,
       'paymentStatus': null,
       'deliveryStatus': null,
       'expectedDeliveryDate': null,
       'orderCreationDate': null,
-      'finalItems': null, // Clear final items, will be re-set from original items
+      'finalItems': null,
       'totalPrice': 0,
       'subtotal': 0,
       'freightCost': 0,
@@ -348,7 +384,7 @@ class _Step3PaymentWidgetState extends State<Step3PaymentWidget> {
     await batch.commit();
 
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pedido copiado com sucesso! Novo Pedido Nº $newSequentialId')));
-    Navigator.of(context).pop(); // Go back to the previous screen
+    Navigator.of(context).pop();
   }
 
   void _updateStatus() {
@@ -378,6 +414,7 @@ class _Step3PaymentWidgetState extends State<Step3PaymentWidget> {
         'freightCost': double.tryParse(_freightCostController.text.replaceAll(',', '.')) ?? 0.0,
         'totalPrice': _overallTotal,
         'status': newStatus,
+        'observation': _observationController.text,
       });
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Informações da compra atualizadas!')));
     }
@@ -387,6 +424,7 @@ class _Step3PaymentWidgetState extends State<Step3PaymentWidget> {
   void dispose() {
     _nfController.dispose();
     _freightCostController.dispose();
+    _observationController.dispose();
     for (var item in _editableItems) {
       item.priceController.dispose();
       item.discountController.dispose();

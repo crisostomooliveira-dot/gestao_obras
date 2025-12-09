@@ -30,11 +30,6 @@ class PurchaseDetailPage extends StatelessWidget {
 
           final data = snapshot.data!.data() as Map<String, dynamic>;
 
-          final items = data['items'] as List<dynamic>?;
-          if (items == null || items.isEmpty) {
-            return const Center(child: Text('Esta solicitação não contém itens.'));
-          }
-
           return _buildStepWidget(context, data);
         },
       ),
@@ -43,6 +38,12 @@ class PurchaseDetailPage extends StatelessWidget {
 
   Widget _buildStepWidget(BuildContext context, Map<String, dynamic> data) {
     final status = data['status'];
+    final approvalStatus = data['approvalStatus'];
+
+    if (approvalStatus == 'Devolvido') {
+      // Se devolvido, volta para a etapa de cotação para correção
+      return Step2PricingWidget(purchaseRequestId: purchaseRequestId, requestData: data);
+    }
 
     switch (status) {
       case 'Solicitado':
@@ -77,7 +78,7 @@ class PurchaseDetailPage extends StatelessWidget {
               child: const Text('Excluir'),
               onPressed: () {
                 _deletePurchaseRequest(context);
-                Navigator.of(ctx).pop(); // Fecha o diálogo
+                Navigator.of(ctx).pop(); 
               },
             ),
           ],
@@ -88,18 +89,15 @@ class PurchaseDetailPage extends StatelessWidget {
 
   void _deletePurchaseRequest(BuildContext context) async {
     try {
-      // O Firestore não deleta subcoleções em cascata, então temos que fazer manualmente.
-      // 1. Deletar a subcoleção de cotações
       final quotations = await FirebaseFirestore.instance.collection('purchase_requests').doc(purchaseRequestId).collection('quotations').get();
       for (var doc in quotations.docs) {
         await doc.reference.delete();
       }
 
-      // 2. Deletar o documento principal do pedido
       await FirebaseFirestore.instance.collection('purchase_requests').doc(purchaseRequestId).delete();
       
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pedido de compra excluído com sucesso!')));
-      Navigator.of(context).pop(); // Volta para a tela anterior (lista de compras)
+      Navigator.of(context).pop();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao excluir pedido: $e')));
     }

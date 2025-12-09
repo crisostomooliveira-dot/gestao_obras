@@ -3,6 +3,7 @@ import 'package:gestao_obras/features/product/product_model.dart';
 import 'package:gestao_obras/features/purchase/purchase_detail_page.dart';
 import 'package:gestao_obras/features/purchase/request_item_model.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 class PurchaseRequestPage extends StatefulWidget {
   const PurchaseRequestPage({super.key});
@@ -15,6 +16,8 @@ class _PurchaseRequestPageState extends State<PurchaseRequestPage> {
   final _headerFormKey = GlobalKey<FormState>();
   String? _selectedConstructionId;
   String? _selectedCostCenterId;
+  DateTime? _deadlineDate;
+  String _processStatus = 'Aberto'; // Valor padrão
 
   final _itemFormKey = GlobalKey<FormState>();
   Product? _selectedProduct;
@@ -66,11 +69,34 @@ class _PurchaseRequestPageState extends State<PurchaseRequestPage> {
   Widget _buildRequestHeader() {
     return Form(
       key: _headerFormKey,
-      child: Row(
+      child: Column(
         children: [
-          Expanded(child: _buildDropdown('constructions', 'Obra', (val) => setState(() => _selectedConstructionId = val))),
-          const SizedBox(width: 16),
-          Expanded(child: _buildDropdown('cost_centers', 'Centro de Custo', (val) => setState(() => _selectedCostCenterId = val))),
+          Row(
+            children: [
+              Expanded(child: _buildDropdown('constructions', 'Obra', (val) => setState(() => _selectedConstructionId = val))),
+              const SizedBox(width: 16),
+              Expanded(child: _buildDropdown('cost_centers', 'Centro de Custo', (val) => setState(() => _selectedCostCenterId = val))),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildDateField(context, 'Prazo para Finalizar', _deadlineDate, (date) => setState(() => _deadlineDate = date))
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: _processStatus,
+                  decoration: const InputDecoration(labelText: 'Status do Processo'),
+                  items: ['Aberto', 'Em processo', 'Finalizada']
+                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                      .toList(),
+                  onChanged: (val) => setState(() => _processStatus = val!),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -151,6 +177,18 @@ class _PurchaseRequestPageState extends State<PurchaseRequestPage> {
       },
     );
   }
+   Widget _buildDateField(BuildContext context, String label, DateTime? date, ValueChanged<DateTime?> onDateChanged) {
+    return TextFormField(
+      readOnly: true,
+      decoration: InputDecoration(labelText: label, suffixIcon: const Icon(Icons.calendar_today)),
+      controller: TextEditingController(text: date == null ? '' : DateFormat('dd/MM/yyyy').format(date)),
+      onTap: () async {
+        final picked = await showDatePicker(context: context, initialDate: date ?? DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime(2100));
+        onDateChanged(picked);
+      },
+       validator: (v) => v == null || v.isEmpty ? 'Obrigatório' : null,
+    );
+  }
 
   void _addItem() {
     if (_itemFormKey.currentState!.validate() && _selectedProduct != null) {
@@ -203,7 +241,10 @@ class _PurchaseRequestPageState extends State<PurchaseRequestPage> {
           'costCenterId': _selectedCostCenterId,
           'items': itemsAsMaps,
           'requestDate': Timestamp.now(),
+          'deadlineDate': _deadlineDate != null ? Timestamp.fromDate(_deadlineDate!) : null,
+          'processStatus': _processStatus,
           'status': 'Solicitado',
+          'approvalStatus': 'Aguardando Aprovação', // Adicionado
         });
 
         transaction.update(counterRef, {'lastNumber': newRequestNumber});

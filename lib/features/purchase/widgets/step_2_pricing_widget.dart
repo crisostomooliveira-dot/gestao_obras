@@ -18,7 +18,6 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
   String _freightType = 'CIF'; // 'CIF' or 'FOB'
   final TextEditingController _freightCostController = TextEditingController();
 
-
   @override
   void initState() {
     super.initState();
@@ -242,45 +241,82 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
     }
 
     final grandTotal = totalValue + totalFreight;
+    String paymentCondition = 'À vista';
+    final installmentsController = TextEditingController(text: '1');
+    final daysController = TextEditingController(text: '30');
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Resumo do Pedido Otimizado'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              ...bestBuys.map((item) => ListTile(
-                title: Text(item['productDescription']),
-                subtitle: Text('Fornecedor: ${item['supplierName']}'),
-                trailing: Text(_formatCurrency(item['unitPrice'] as double)),
-              )),
-              const Divider(),
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: Text('Valor Total dos Itens: ${_formatCurrency(totalValue)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+      builder: (ctx) {
+        return StatefulBuilder( // Adicionado para atualizar o diálogo
+          builder: (context, setDialogState) {
+            bool showInstallmentFields = paymentCondition == 'Boleto';
+            return AlertDialog(
+              title: const Text('Resumo do Pedido Otimizado'),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    ...bestBuys.map((item) => ListTile(
+                          title: Text(item['productDescription']),
+                          subtitle: Text('Fornecedor: ${item['supplierName']}'),
+                          trailing: Text(_formatCurrency(item['unitPrice'] as double)),
+                        )),
+                    const Divider(),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text('Valor Total dos Itens: ${_formatCurrency(totalValue)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text('Custo Total do Frete: ${_formatCurrency(totalFreight)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text('Valor Total do Pedido: ${_formatCurrency(grandTotal)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    ),
+                    const Divider(),
+                    DropdownButtonFormField<String>(
+                      value: paymentCondition,
+                      decoration: const InputDecoration(labelText: 'Condição de Pagamento'),
+                      items: ['À vista', 'Boleto'].map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          setDialogState(() => paymentCondition = val);
+                        }
+                      },
+                    ),
+                    if (showInstallmentFields)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 16.0),
+                        child: Row(
+                          children: [
+                            Expanded(child: TextFormField(controller: installmentsController, decoration: const InputDecoration(labelText: 'Nº de Parcelas'), keyboardType: TextInputType.number)),
+                            const SizedBox(width: 16),
+                            Expanded(child: TextFormField(controller: daysController, decoration: const InputDecoration(labelText: 'Dias entre Parcelas'), keyboardType: TextInputType.number)),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: Text('Custo Total do Frete: ${_formatCurrency(totalFreight)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: Text('Valor Total do Pedido: ${_formatCurrency(grandTotal)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              ),
-            ]
-          )
-        ),
-        actions: [
-          TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(ctx).pop()),
-          ElevatedButton(child: const Text('Confirmar e Criar Pedido'), onPressed: () {
-            _createMixedPurchaseOrder(bestBuys, grandTotal);
-            Navigator.of(ctx).pop();
-          })
-        ]
-      )
+              actions: [
+                TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(ctx).pop()),
+                ElevatedButton(
+                  child: const Text('Confirmar e Criar Pedido'),
+                  onPressed: () {
+                    int installments = int.tryParse(installmentsController.text) ?? 1;
+                    int daysBetween = int.tryParse(daysController.text) ?? 30;
+                    _createMixedPurchaseOrder(bestBuys, grandTotal, paymentCondition, installments, daysBetween);
+                    Navigator.of(ctx).pop();
+                  },
+                )
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -304,19 +340,35 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
     return bestBuys;
   }
 
-  void _createMixedPurchaseOrder(List<Map<String, dynamic>> finalItems, double totalValue) {
+  void _createMixedPurchaseOrder(List<Map<String, dynamic>> finalItems, double totalValue, String paymentCondition, int installments, int daysBetween) {
     final supplierNames = finalItems.map((item) => item['supplierName'] as String?).toSet();
     supplierNames.removeWhere((name) => name == null);
     String finalSupplierName = 'Compra Mista';
     if (supplierNames.length == 1) {
       finalSupplierName = supplierNames.first!;
     }
+
+    List<Map<String, dynamic>> paymentInstallments = [];
+    if (paymentCondition == 'Boleto') {
+      final double installmentValue = totalValue / installments;
+      for (int i = 0; i < installments; i++) {
+        paymentInstallments.add({
+          'installmentNumber': i + 1,
+          'value': installmentValue,
+          'dueDate': Timestamp.fromDate(DateTime.now().add(Duration(days: daysBetween * (i + 1)))),
+          'status': 'Pendente',
+        });
+      }
+    }
+
     FirebaseFirestore.instance.collection('purchase_requests').doc(widget.purchaseRequestId).update({
       'status': 'Pedido Criado',
       'selectedSupplierName': finalSupplierName,
       'totalPrice': totalValue,
       'finalItems': finalItems,
-      'orderCreationDate': Timestamp.now()
+      'orderCreationDate': Timestamp.now(),
+      'paymentCondition': paymentCondition,
+      'paymentInstallments': paymentInstallments, // Salva as parcelas
     });
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pedido de compra criado com sucesso!')));
   }

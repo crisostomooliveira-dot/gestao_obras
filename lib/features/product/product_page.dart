@@ -18,7 +18,7 @@ class _ProductPageState extends State<ProductPage> {
   bool _showOtherUnitField = false;
 
   final List<String> _standardUnits = ['Kg', 'Litros', 'Metros', 'Barra', 'Peças', 'Outro'];
-  final List<String> _usageCategories = ['Obra', 'Alojamento', 'Aluguel', 'Equipamentos'];
+  final List<String> _usageCategories = ['Obra', 'Alojamento', 'Aluguel', 'Equipamentos', 'Equip. Prot. Individual'];
 
   @override
   Widget build(BuildContext context) {
